@@ -1,0 +1,132 @@
+//@version=5
+indicator("EMA + MA + VWAP + Auto AVWAP", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// =============================================================================
+// Inputs
+// =============================================================================
+emaGrp = "EMA Settings"
+emaLen1 = input.int(9,  "EMA 1 Length", minval = 1, group = emaGrp)
+emaLen2 = input.int(21, "EMA 2 Length", minval = 1, group = emaGrp)
+emaLen3 = input.int(55, "EMA 3 Length", minval = 1, group = emaGrp)
+emaSrc  = input.source(close, "EMA Source", group = emaGrp)
+
+maGrp = "MA (SMA) Settings"
+maLen1 = input.int(20,  "MA 1 Length", minval = 1, group = maGrp)
+maLen2 = input.int(50,  "MA 2 Length", minval = 1, group = maGrp)
+maLen3 = input.int(200, "MA 3 Length", minval = 1, group = maGrp)
+maSrc  = input.source(close, "MA Source", group = maGrp)
+
+vwapGrp = "VWAP"
+showVwap   = input.bool(true, "Show Session VWAP", group = vwapGrp)
+vwapAnchor = input.string("Session", "Session VWAP Anchor",
+     options = ["Session", "Week", "Month", "Quarter", "Year"], group = vwapGrp)
+vwapSrc    = input.source(hlc3, "VWAP Source", group = vwapGrp)
+
+avwapGrp = "Auto AVWAP (Anchored at recent pivots)"
+showAvwap   = input.bool(true,  "Show Auto AVWAP", group = avwapGrp)
+pivotLeft   = input.int(20, "Pivot Left Bars",  minval = 1, group = avwapGrp)
+pivotRight  = input.int(10, "Pivot Right Bars", minval = 1, group = avwapGrp)
+avwapSrc    = input.source(hlc3, "AVWAP Source", group = avwapGrp)
+showPivots  = input.bool(true,  "Mark Pivots", group = avwapGrp)
+
+// =============================================================================
+// EMAs
+// =============================================================================
+ema1 = ta.ema(emaSrc, emaLen1)
+ema2 = ta.ema(emaSrc, emaLen2)
+ema3 = ta.ema(emaSrc, emaLen3)
+
+plot(ema1, "EMA 1", color = color.new(color.aqua,   0), linewidth = 2)
+plot(ema2, "EMA 2", color = color.new(color.orange, 0), linewidth = 2)
+plot(ema3, "EMA 3", color = color.new(color.fuchsia,0), linewidth = 2)
+
+// =============================================================================
+// MAs (SMA)
+// =============================================================================
+ma1 = ta.sma(maSrc, maLen1)
+ma2 = ta.sma(maSrc, maLen2)
+ma3 = ta.sma(maSrc, maLen3)
+
+plot(ma1, "MA 1", color = color.new(color.yellow, 0), linewidth = 1)
+plot(ma2, "MA 2", color = color.new(color.lime,   0), linewidth = 1)
+plot(ma3, "MA 3", color = color.new(color.red,    0), linewidth = 2)
+
+// =============================================================================
+// VWAP (session / period based)
+// =============================================================================
+isNewPeriod() =>
+    switch vwapAnchor
+        "Session" => session.isfirstbar_regular
+        "Week"    => timeframe.change("W")
+        "Month"   => timeframe.change("M")
+        "Quarter" => timeframe.change("3M")
+        "Year"    => timeframe.change("12M")
+        => session.isfirstbar_regular
+
+var float vwapNum = na
+var float vwapDen = na
+
+if isNewPeriod()
+    vwapNum := vwapSrc * volume
+    vwapDen := volume
+else
+    vwapNum := nz(vwapNum) + vwapSrc * volume
+    vwapDen := nz(vwapDen) + volume
+
+vwapVal = vwapDen > 0 ? vwapNum / vwapDen : na
+plot(showVwap ? vwapVal : na, "VWAP", color = color.new(color.blue, 0), linewidth = 2)
+
+// =============================================================================
+// Auto AVWAP – anchored at the most recent confirmed pivot high & pivot low
+// =============================================================================
+ph = ta.pivothigh(high, pivotLeft, pivotRight)
+pl = ta.pivotlow(low,  pivotLeft, pivotRight)
+
+// Track running sums from the last pivot anchor.
+var float avwapHighNum = na
+var float avwapHighDen = na
+var float avwapLowNum  = na
+var float avwapLowDen  = na
+var int   avwapHighBar = na
+var int   avwapLowBar  = na
+
+// When a new pivot high is confirmed, restart the AVWAP from that pivot bar.
+// Pivots confirm `pivotRight` bars after they form, so we seed the running
+// sums by walking back over those bars.
+if not na(ph)
+    avwapHighNum := 0.0
+    avwapHighDen := 0.0
+    for i = pivotRight to 0
+        avwapHighNum += avwapSrc[i] * volume[i]
+        avwapHighDen += volume[i]
+    avwapHighBar := bar_index - pivotRight
+else if not na(avwapHighDen)
+    avwapHighNum += avwapSrc * volume
+    avwapHighDen += volume
+
+if not na(pl)
+    avwapLowNum := 0.0
+    avwapLowDen := 0.0
+    for i = pivotRight to 0
+        avwapLowNum += avwapSrc[i] * volume[i]
+        avwapLowDen += volume[i]
+    avwapLowBar := bar_index - pivotRight
+else if not na(avwapLowDen)
+    avwapLowNum += avwapSrc * volume
+    avwapLowDen += volume
+
+avwapHigh = avwapHighDen > 0 ? avwapHighNum / avwapHighDen : na
+avwapLow  = avwapLowDen  > 0 ? avwapLowNum  / avwapLowDen  : na
+
+plot(showAvwap ? avwapHigh : na, "AVWAP (Pivot High)",
+     color = color.new(color.red, 0), linewidth = 2, style = plot.style_line)
+plot(showAvwap ? avwapLow : na,  "AVWAP (Pivot Low)",
+     color = color.new(color.green, 0), linewidth = 2, style = plot.style_line)
+
+// Optional pivot markers
+plotshape(showPivots and not na(ph) ? high[pivotRight] : na, "Pivot High",
+     style = shape.triangledown, location = location.abovebar,
+     color = color.new(color.red, 0), size = size.tiny, offset = -pivotRight)
+plotshape(showPivots and not na(pl) ? low[pivotRight] : na,  "Pivot Low",
+     style = shape.triangleup, location = location.belowbar,
+     color = color.new(color.green, 0), size = size.tiny, offset = -pivotRight)
