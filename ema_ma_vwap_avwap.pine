@@ -1,90 +1,56 @@
 //@version=6
-indicator("EMA + MA + VWAP + Auto AVWAP", overlay = true, max_lines_count = 500, max_labels_count = 500)
+indicator("EMA + MA + VWAP + Auto AVWAP", overlay = true)
 
 // ============ Inputs ============
-emaLen1 = input.int(9,  "EMA 1 Length", minval = 1, group = "EMA")
-emaLen2 = input.int(21, "EMA 2 Length", minval = 1, group = "EMA")
-emaLen3 = input.int(55, "EMA 3 Length", minval = 1, group = "EMA")
-emaSrc  = input.source(close, "EMA Source", group = "EMA")
-
-maLen1 = input.int(20,  "MA 1 Length", minval = 1, group = "MA")
-maLen2 = input.int(50,  "MA 2 Length", minval = 1, group = "MA")
-maLen3 = input.int(200, "MA 3 Length", minval = 1, group = "MA")
-maSrc  = input.source(close, "MA Source", group = "MA")
+emaLen1 = input.int(9,   "EMA 1 Length", minval = 1, group = "EMA")
+emaLen2 = input.int(21,  "EMA 2 Length", minval = 1, group = "EMA")
+emaLen3 = input.int(55,  "EMA 3 Length", minval = 1, group = "EMA")
+maLen1  = input.int(20,  "MA 1 Length",  minval = 1, group = "MA")
+maLen2  = input.int(50,  "MA 2 Length",  minval = 1, group = "MA")
+maLen3  = input.int(200, "MA 3 Length",  minval = 1, group = "MA")
 
 showVwap   = input.bool(true, "Show VWAP", group = "VWAP")
 vwapAnchor = input.string("Session", "VWAP Anchor", options = ["Session", "Week", "Month", "Quarter", "Year"], group = "VWAP")
-vwapSrc    = input.source(hlc3, "VWAP Source", group = "VWAP")
 
-showAvwap  = input.bool(true,  "Show Auto AVWAP", group = "Auto AVWAP")
+showAvwap  = input.bool(true, "Show Auto AVWAP", group = "Auto AVWAP")
 pivotLeft  = input.int(20, "Pivot Left Bars",  minval = 1, group = "Auto AVWAP")
 pivotRight = input.int(10, "Pivot Right Bars", minval = 1, group = "Auto AVWAP")
-avwapSrc   = input.source(hlc3, "AVWAP Source", group = "Auto AVWAP")
-showPivots = input.bool(true,  "Mark Pivots", group = "Auto AVWAP")
 
 // ============ EMAs ============
-ema1 = ta.ema(emaSrc, emaLen1)
-ema2 = ta.ema(emaSrc, emaLen2)
-ema3 = ta.ema(emaSrc, emaLen3)
-plot(ema1, "EMA 1", color = color.aqua,    linewidth = 2)
-plot(ema2, "EMA 2", color = color.orange,  linewidth = 2)
-plot(ema3, "EMA 3", color = color.fuchsia, linewidth = 2)
+plot(ta.ema(close, emaLen1), "EMA 1", color = color.aqua,    linewidth = 2)
+plot(ta.ema(close, emaLen2), "EMA 2", color = color.orange,  linewidth = 2)
+plot(ta.ema(close, emaLen3), "EMA 3", color = color.fuchsia, linewidth = 2)
 
 // ============ MAs ============
-ma1 = ta.sma(maSrc, maLen1)
-ma2 = ta.sma(maSrc, maLen2)
-ma3 = ta.sma(maSrc, maLen3)
-plot(ma1, "MA 1", color = color.yellow, linewidth = 1)
-plot(ma2, "MA 2", color = color.lime,   linewidth = 1)
-plot(ma3, "MA 3", color = color.red,    linewidth = 2)
+plot(ta.sma(close, maLen1), "MA 1", color = color.yellow, linewidth = 1)
+plot(ta.sma(close, maLen2), "MA 2", color = color.lime,   linewidth = 1)
+plot(ta.sma(close, maLen3), "MA 3", color = color.red,    linewidth = 2)
 
 // ============ VWAP (period anchored) ============
 isNew = vwapAnchor == "Session" ? session.isfirstbar_regular : vwapAnchor == "Week" ? timeframe.change("W") : vwapAnchor == "Month" ? timeframe.change("M") : vwapAnchor == "Quarter" ? timeframe.change("3M") : timeframe.change("12M")
 
-var float vNum = na
-var float vDen = na
-if isNew
-    vNum := vwapSrc * volume
-    vDen := volume
-else
-    vNum := nz(vNum) + vwapSrc * volume
-    vDen := nz(vDen) + volume
-vwapVal = vDen > 0 ? vNum / vDen : na
-plot(showVwap ? vwapVal : na, "VWAP", color = color.blue, linewidth = 2)
+var float vNum = 0.0
+var float vDen = 0.0
+vNum := isNew ? hlc3 * volume : vNum + hlc3 * volume
+vDen := isNew ? volume        : vDen + volume
+plot(showVwap and vDen > 0 ? vNum / vDen : na, "VWAP", color = color.blue, linewidth = 2)
 
-// ============ Auto AVWAP from latest pivot high & low ============
+// ============ Auto AVWAP - resets on each new confirmed pivot ============
 ph = ta.pivothigh(high, pivotLeft, pivotRight)
 pl = ta.pivotlow(low,   pivotLeft, pivotRight)
 
-var float ahNum = na
-var float ahDen = na
-var float alNum = na
-var float alDen = na
+var float ahNum = 0.0
+var float ahDen = 0.0
+ahNum := not na(ph) ? hlc3 * volume : ahNum + hlc3 * volume
+ahDen := not na(ph) ? volume        : ahDen + volume
 
-if not na(ph)
-    ahNum := 0.0
-    ahDen := 0.0
-    for i = pivotRight to 0
-        ahNum += avwapSrc[i] * volume[i]
-        ahDen += volume[i]
-else if not na(ahDen)
-    ahNum += avwapSrc * volume
-    ahDen += volume
+var float alNum = 0.0
+var float alDen = 0.0
+alNum := not na(pl) ? hlc3 * volume : alNum + hlc3 * volume
+alDen := not na(pl) ? volume        : alDen + volume
 
-if not na(pl)
-    alNum := 0.0
-    alDen := 0.0
-    for i = pivotRight to 0
-        alNum += avwapSrc[i] * volume[i]
-        alDen += volume[i]
-else if not na(alDen)
-    alNum += avwapSrc * volume
-    alDen += volume
+plot(showAvwap and ahDen > 0 ? ahNum / ahDen : na, "AVWAP (Pivot High)", color = color.red,   linewidth = 2)
+plot(showAvwap and alDen > 0 ? alNum / alDen : na, "AVWAP (Pivot Low)",  color = color.green, linewidth = 2)
 
-avwapHigh = ahDen > 0 ? ahNum / ahDen : na
-avwapLow  = alDen > 0 ? alNum / alDen : na
-plot(showAvwap ? avwapHigh : na, "AVWAP (Pivot High)", color = color.red,   linewidth = 2)
-plot(showAvwap ? avwapLow  : na, "AVWAP (Pivot Low)",  color = color.green, linewidth = 2)
-
-plotshape(showPivots and not na(ph) ? high[pivotRight] : na, "Pivot High", style = shape.triangledown, location = location.abovebar, color = color.red,   size = size.tiny, offset = -pivotRight)
-plotshape(showPivots and not na(pl) ? low[pivotRight]  : na, "Pivot Low",  style = shape.triangleup,   location = location.belowbar, color = color.green, size = size.tiny, offset = -pivotRight)
+plotshape(not na(ph) ? high[pivotRight] : na, "Pivot High", style = shape.triangledown, location = location.abovebar, color = color.red,   size = size.tiny, offset = -pivotRight)
+plotshape(not na(pl) ? low[pivotRight]  : na, "Pivot Low",  style = shape.triangleup,   location = location.belowbar, color = color.green, size = size.tiny, offset = -pivotRight)
